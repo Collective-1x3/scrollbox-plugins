@@ -46,17 +46,17 @@ L'agent reçoit l'event en live, appelle les MCP tools Scrollbox sur
 ### Une fois le plugin publié sur GitHub
 
 ```
-/plugin marketplace add scrollbox/scrollbox-plugins
-/plugin install scrollbox@scrollbox-plugins
+/plugin marketplace add Collective-1x3/scrollbox-plugins
+/plugin install scrollbox@scrollbox
 /reload-plugins
 ```
 
 ### Dev local (avant publication)
 
 ```
-git clone https://github.com/scrollbox/scrollbox-plugins
+git clone https://github.com/Collective-1x3/scrollbox-plugins
 /plugin marketplace add ./scrollbox-plugins
-/plugin install scrollbox@scrollbox-plugins
+/plugin install scrollbox@scrollbox
 ```
 
 ## Configuration
@@ -74,12 +74,12 @@ git clone https://github.com/scrollbox/scrollbox-plugins
 
 3. **Lance Claude Code avec le channel activé.**
    ```bash
-   claude --channels plugin:scrollbox@scrollbox-plugins
+   claude --channels plugin:scrollbox@scrollbox
    ```
    Pendant la research preview, si le plugin n'est pas encore sur la
    allowlist Anthropic :
    ```bash
-   claude --dangerously-load-development-channels plugin:scrollbox@scrollbox-plugins
+   claude --dangerously-load-development-channels plugin:scrollbox@scrollbox
    ```
 
 4. **Vérifie l'état.**

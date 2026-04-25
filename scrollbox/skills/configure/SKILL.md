@@ -34,7 +34,7 @@ Read the state files and give the user a clear picture:
 2. **Last poll** — read `~/.claude/channels/scrollbox/state.json`. If
    `lastPollAt` is within the last 60 seconds, the channel is healthy.
    Older or missing means either (a) Claude Code wasn't started with
-   `--channels plugin:scrollbox@scrollbox-plugins`, or (b) the token is bad.
+   `--channels plugin:scrollbox@scrollbox`, or (b) the token is bad.
 
 3. **Base URL** — `SCROLLBOX_BASE_URL` from `.env` if set, else default
    `https://scroll-box.com`. Show only if non-default.
@@ -43,7 +43,7 @@ Read the state files and give the user a clear picture:
    - No token → *"Run `/scrollbox:configure <token>` with the key from
      scroll-box.com/compte/cle-mcp."*
    - Token set, no recent poll → *"Restart Claude Code with
-     `claude --channels plugin:scrollbox@scrollbox-plugins`."*
+     `claude --channels plugin:scrollbox@scrollbox`."*
    - Token set, recent poll → *"Channel live. Prompt from the canvas at
      scroll-box.com to push events here."*
 
@@ -68,7 +68,7 @@ When the user passes a single token argument:
 
 5. Confirm to the user:
    - "Saved to `~/.claude/channels/scrollbox/.env`."
-   - "If Claude Code is running with `--channels plugin:scrollbox@scrollbox-plugins`,
+   - "If Claude Code is running with `--channels plugin:scrollbox@scrollbox`,
       the next poll uses the new token (within 30s). Otherwise restart with
       that flag."
 
