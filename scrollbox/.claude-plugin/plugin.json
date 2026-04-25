@@ -1,0 +1,14 @@
+{
+  "name": "scrollbox",
+  "description": "Scrollbox channel for Claude Code — push prompts from scroll-box.com directly into your terminal session. Pair with /scrollbox:configure <token>, then prompt from the canvas: the agent receives the event, calls Scrollbox MCP tools, replies stream back to the site.",
+  "version": "0.1.0",
+  "keywords": [
+    "scrollbox",
+    "tiktok",
+    "carousel",
+    "channel",
+    "mcp",
+    "creator",
+    "studio"
+  ]
+}

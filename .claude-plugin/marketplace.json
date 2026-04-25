@@ -1,0 +1,23 @@
+{
+  "$schema": "https://anthropic.com/claude-plugins/marketplace.schema.json",
+  "name": "scrollbox",
+  "version": "0.1.0",
+  "description": "Channel Scrollbox — push prompts from scroll-box.com directly into your local Claude Code session.",
+  "owner": {
+    "name": "Scrollbox",
+    "url": "https://scroll-box.com"
+  },
+  "plugins": [
+    {
+      "id": "scrollbox",
+      "name": "Scrollbox",
+      "version": "0.1.0",
+      "description": "Channel plugin — long-poll bridge between scroll-box.com and Claude Code. Click 'Décliner' on the site, the prompt arrives in your terminal in seconds.",
+      "source": "./scrollbox",
+      "homepage": "https://scroll-box.com/compte/cle-mcp",
+      "license": "Apache-2.0",
+      "category": "channel",
+      "keywords": ["scrollbox", "channel", "tiktok", "carousel", "content"]
+    }
+  ]
+}
