@@ -52,56 +52,20 @@ You now know exactly where text can go and how big it can be for every format.
 
 ---
 
-## 0bis. Channel events — locked layers et sélection user (CRITIQUE)
+## 0bis. Locked layers — never modify (CRITIQUE)
 
-When you receive a `<channel source="scrollbox">` event, the **piece snapshot** in the body tells you what NOT to touch. Read it before doing anything.
+The user can mark layers as **locked** in the studio (toggle 🔒 dans le props panel, ou Cmd+L). These layers are **load-bearing** — real proofs (revenue screenshots, testimonials), brand elements, signature photos. The user explicitly marked them as untouchable.
 
-### `🔒 Locked layers` block — **never modify**
+When you call `get_piece_v2(pieceId)` and inspect the slides, every layer has a `locked` field. **If `locked === true` :**
 
-If the snapshot contains:
-
-```
-🔒 Locked layers (NE PAS MODIFIER):
-  - lyr_xxx (image) "preuve_revenu_screenshot"
-  - lyr_yyy (text) "Témoignage Marie"
-```
-
-Those layers are user-protected. **Hard rule:**
-
-- Do NOT change their `src`, `text`, position, size, rotation, opacity, or any other property.
-- When you call `update_piece` / `update_piece_slot`, exclude them from the patch.
-- If declining the piece, the variant must keep them byte-identical (decline framework already handles this when `locked: true` is set, but double-check).
+- Do NOT change its `src`, `text`, position, size, rotation, opacity, or any other property.
+- When you call `update_piece` / `update_piece_slot`, exclude these layers from the patch.
+- When declining the piece, the variant must keep them byte-identical. The `lib/decline` framework's `findAdaptableTextLayers` and `findSwappableImageLayers` already filter them out — but if you build patches manually, double-check.
 - If validation flags a locked layer (rare), prefer `post_agent_message` to ask the user how to resolve, never autofix it.
 
-The user marked them locked because they're load-bearing (real proof, brand, signature element). Touching them = breaks the piece's authenticity.
+The user can also lock an entire slide via the context menu — that just sets `locked: true` on every layer of that slide. Same rule applies to all of them : preserve byte-identical.
 
-### `selected_layer_id` in context — **preserve by default**
-
-The push context may include:
-
-```
-Context:
-  selected_layer_id: lyr_abc
-  selected_layer_type: image
-  selected_layer_label: "preuve_3"
-  selected_layer_locked: false
-```
-
-Convention:
-
-- If the user's instruction does **not** mention this layer explicitly → **preserve it** (treat it like an implicit lock for this task only).
-- If the instruction is "change everything except / sauf / garde / keep this" → confirm by preserving the selected layer.
-- If the instruction directly targets the layer ("rewrite THIS hook", "swap THIS photo") → operate on it.
-- When ambiguous, default to preservation and mention it in your `reply` ("Gardé `preuve_3` intact, modifié le reste — dis-moi si tu voulais autre chose").
-
-This is softer than `locked: true` — it's a session hint, not a permanent flag. The user clicked the layer right before prompting, so it's "what they're holding in their hands". Don't drop it on the floor.
-
-### Why both exist
-
-- **`locked: true`** = durable. Survives page reloads, decline forks, batch renders. For load-bearing assets (proofs, brand element, signature photo).
-- **`selected_layer_id`** = ephemeral. Only this push. For "the thing I just clicked, leave it alone for now".
-
-Together, they let the user say "preserve these forever, plus this for now" without writing it in the prompt.
+Touching a locked layer = breaks the piece's authenticity (real proof becomes fake) or its brand consistency. This is the most important guardrail you must respect.
 
 ---
 
