@@ -25,7 +25,7 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -34,7 +34,95 @@ import { join } from "node:path";
 const CONFIG_DIR = join(homedir(), ".claude", "channels", "scrollbox");
 const ENV_FILE = join(CONFIG_DIR, ".env");
 const STATE_FILE = join(CONFIG_DIR, "state.json");
+const PID_FILE = join(CONFIG_DIR, "server.pid");
 const DEFAULT_BASE_URL = "https://scroll-box.com";
+
+// ── Single-instance enforcement ──────────────────────────────────────────
+// Claude Code spawns plugins per session but doesn't always clean them up
+// (force-quit, crash, system sleep). Without this, instances pile up and
+// each one polls /api/channel/dequeue → Vercel cost explosion. At startup
+// we kill any previous PID we recorded ; only one plugin process survives.
+
+function killPreviousInstance(): void {
+  if (!existsSync(PID_FILE)) return;
+  try {
+    const raw = readFileSync(PID_FILE, "utf-8").trim();
+    const oldPid = Number.parseInt(raw, 10);
+    if (!Number.isFinite(oldPid) || oldPid <= 0 || oldPid === process.pid) return;
+    try {
+      // Signal 0 = "is the process alive" without actually signaling.
+      process.kill(oldPid, 0);
+    } catch {
+      // ESRCH — already dead, nothing to do.
+      return;
+    }
+    try {
+      process.kill(oldPid, "SIGTERM");
+      console.error(`[scrollbox-channel] killed previous instance PID ${oldPid}`);
+      // SIGKILL fallback after a short delay if it didn't die.
+      setTimeout(() => {
+        try {
+          process.kill(oldPid, 0);
+          process.kill(oldPid, "SIGKILL");
+        } catch {
+          // already gone, good
+        }
+      }, 500);
+    } catch (err) {
+      console.error(
+        `[scrollbox-channel] could not kill previous PID ${oldPid}:`,
+        err instanceof Error ? err.message : String(err)
+      );
+    }
+  } catch {
+    // unreadable pid file — ignore
+  }
+}
+
+function writePidFile(): void {
+  if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true });
+  writeFileSync(PID_FILE, String(process.pid), "utf-8");
+}
+
+function cleanupPidFile(): void {
+  try {
+    if (!existsSync(PID_FILE)) return;
+    const raw = readFileSync(PID_FILE, "utf-8").trim();
+    if (Number.parseInt(raw, 10) === process.pid) {
+      unlinkSync(PID_FILE);
+    }
+  } catch {
+    // best-effort
+  }
+}
+
+// ── Parent-disconnect detection ──────────────────────────────────────────
+// MCP transports use stdio. When Claude Code dies, its stdio pipes close
+// → our stdin emits 'end' / 'close'. We exit so we don't become a zombie
+// re-parented to init that keeps polling forever.
+
+function installParentDisconnectGuard(): void {
+  process.stdin.on("end", () => {
+    console.error("[scrollbox-channel] stdin closed (parent disconnect) — exiting");
+    process.exit(0);
+  });
+  process.stdin.on("close", () => {
+    console.error("[scrollbox-channel] stdin closed (parent disconnect) — exiting");
+    process.exit(0);
+  });
+  // Also handle the standard signals so cleanup runs.
+  for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
+    process.on(sig, () => {
+      console.error(`[scrollbox-channel] received ${sig} — exiting`);
+      process.exit(0);
+    });
+  }
+  process.on("exit", cleanupPidFile);
+}
+
+killPreviousInstance();
+writePidFile();
+installParentDisconnectGuard();
 
 interface State {
   /** scroll-box.com user email — surfaced for /scrollbox:configure status */
@@ -235,11 +323,83 @@ interface QueuedEvent {
     axes?: string[];
     context?: Record<string, unknown>;
     kind?: string;
+    /** Snapshot léger fetché côté serveur — économise un get_piece_v2 initial. */
+    pieceSnapshot?: {
+      id?: string;
+      name?: string;
+      mode?: string;
+      slideCount?: number;
+      skeletonSlug?: string;
+      styleSlug?: string;
+      accountName?: string;
+      accountHandle?: string;
+      productName?: string;
+      /**
+       * Layers que l'user a explicitement verrouillés. L'agent NE doit PAS
+       * les modifier, ni leur position, ni leur contenu (cf. skill).
+       */
+      lockedLayers?: Array<{ id: string; type: string; label: string }>;
+    };
   };
   createdAt: string;
 }
 
-async function pollOnce(token: string, baseUrl: string): Promise<QueuedEvent | "timeout" | "error" | "auth_error"> {
+/**
+ * Poll outcome — `retryAfterMs` is honored by pollLoop to back off cheaply
+ * when the server tells us the bridge is inactive (cost-optim Vercel).
+ */
+type PollResult =
+  | { kind: "event"; event: QueuedEvent }
+  | { kind: "timeout"; retryAfterMs?: number }
+  | { kind: "error"; retryAfterMs?: number }
+  | { kind: "auth_error"; retryAfterMs?: number };
+
+function parseRetryAfter(headerValue: string | null): number | undefined {
+  if (!headerValue) return undefined;
+  // RFC 7231 — Retry-After is delta-seconds OR an HTTP-date. We support seconds.
+  const seconds = Number.parseInt(headerValue.trim(), 10);
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.min(seconds, 600) * 1000; // cap at 10min
+  }
+  return undefined;
+}
+
+// ── Heartbeat → site ──────────────────────────────────────────────────────
+// Le site /api/channel/status dérive online/silent/absent à partir du
+// timestamp `users.channel_plugin_last_seen_at`. On le bumpe à chaque poll
+// réussi (timeout OU event), dédupliqué à 30s pour ne pas spammer Vercel.
+
+// 60s — assez fréquent pour que le serveur (ONLINE_WINDOW=90s) garde l'user
+// "online", mais pas plus, pour minimiser le coût Vercel. Un user actif sur
+// le canvas génère donc ≤1 POST/min (vs 2/min à 30s).
+const HEARTBEAT_DEDUP_MS = 60_000;
+let lastHeartbeatAt = 0;
+
+async function sendHeartbeat(token: string, baseUrl: string): Promise<void> {
+  const now = Date.now();
+  if (now - lastHeartbeatAt < HEARTBEAT_DEDUP_MS) return;
+  lastHeartbeatAt = now;
+  try {
+    await fetch(`${baseUrl}/api/channel/heartbeat`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        pluginVersion: process.env.npm_package_version ?? "0.1.0",
+      }),
+      signal: AbortSignal.timeout(5_000),
+    });
+  } catch (err) {
+    // Best-effort — heartbeat failures don't break the loop.
+    console.error(
+      `[scrollbox-channel] heartbeat failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+async function pollOnce(token: string, baseUrl: string): Promise<PollResult> {
   try {
     const res = await fetch(`${baseUrl}/api/channel/dequeue?wait=30`, {
       method: "GET",
@@ -250,30 +410,50 @@ async function pollOnce(token: string, baseUrl: string): Promise<QueuedEvent | "
       signal: AbortSignal.timeout(POLL_TIMEOUT_MS + 5_000),
     });
 
-    // 204 No Content = long-poll timed out, no event ready
-    if (res.status === 204) return "timeout";
+    const retryAfterMs = parseRetryAfter(res.headers.get("Retry-After"));
+
+    // 204 No Content = long-poll timed out OR bridge inactive (server hint).
+    // When inactive the server sends Retry-After:60 ; honor it to drop polling
+    // frequency from continuous to 1/min.
+    if (res.status === 204) return { kind: "timeout", retryAfterMs };
 
     // 401/403 = bad token, back off harder
     if (res.status === 401 || res.status === 403) {
       console.error(`[scrollbox-channel] auth rejected (HTTP ${res.status}). Run /scrollbox:configure with a valid token.`);
-      return "auth_error";
+      return { kind: "auth_error", retryAfterMs };
+    }
+
+    // 400 = often "owner key without x-act-as-user". Print actionable
+    // guidance so the user doesn't have to spelunk the API.
+    if (res.status === 400) {
+      const body = await res.text().catch(() => "");
+      if (body.toLowerCase().includes("owner") || body.toLowerCase().includes("act-as-user")) {
+        console.error(
+          "[scrollbox-channel] dequeue rejected — your token is an OWNER key (sk_owner_* or env key).",
+          "The bridge needs a USER-scoped key (sk_user_*). Create one at scroll-box.com/compte/cle-mcp,",
+          "then run /scrollbox:configure with the new token.",
+        );
+      } else {
+        console.error(`[scrollbox-channel] dequeue 400: ${body.slice(0, 240)}`);
+      }
+      return { kind: "auth_error", retryAfterMs: BACKOFF_4XX_MS };
     }
 
     if (!res.ok) {
       console.error(`[scrollbox-channel] dequeue HTTP ${res.status}`);
-      return "error";
+      return { kind: "error", retryAfterMs };
     }
 
     const event = (await res.json()) as QueuedEvent;
-    return event;
+    return { kind: "event", event };
   } catch (err) {
     if (err instanceof Error && err.name === "TimeoutError") {
-      return "timeout";
+      return { kind: "timeout" };
     }
     console.error(
       `[scrollbox-channel] dequeue network error: ${err instanceof Error ? err.message : String(err)}`,
     );
-    return "error";
+    return { kind: "error" };
   }
 }
 
@@ -292,6 +472,39 @@ function buildMeta(event: QueuedEvent): Record<string, string> {
 function buildContent(event: QueuedEvent): string {
   const lines: string[] = [];
   lines.push(event.payload.instruction.trim());
+
+  // Pre-loaded snapshot of the piece — saves an initial get_piece_v2 call.
+  // Only printed when present (push always sends it for canvas-scoped events).
+  const snap = event.payload.pieceSnapshot;
+  if (snap) {
+    lines.push("");
+    lines.push("Piece snapshot:");
+    if (snap.name) lines.push(`  name: ${snap.name}`);
+    if (snap.mode) lines.push(`  mode: ${snap.mode}`);
+    if (typeof snap.slideCount === "number") {
+      lines.push(`  slide_count: ${snap.slideCount}`);
+    }
+    if (snap.skeletonSlug) lines.push(`  skeleton: ${snap.skeletonSlug}`);
+    if (snap.styleSlug) lines.push(`  style: ${snap.styleSlug}`);
+    if (snap.accountName) {
+      const handle = snap.accountHandle ? ` (${snap.accountHandle})` : "";
+      lines.push(`  account: ${snap.accountName}${handle}`);
+    }
+    if (snap.productName) lines.push(`  product: ${snap.productName}`);
+
+    // Layers verrouillés — l'user les a explicitement marqués comme protégés.
+    // NE JAMAIS les modifier (position, contenu, taille). Voir skill section
+    // "Layers verrouillés et sélection user".
+    if (snap.lockedLayers && snap.lockedLayers.length > 0) {
+      lines.push("");
+      lines.push("🔒 Locked layers (NE PAS MODIFIER):");
+      for (const l of snap.lockedLayers) {
+        const label = l.label ? ` "${l.label}"` : "";
+        lines.push(`  - ${l.id} (${l.type})${label}`);
+      }
+    }
+  }
+
   if (event.payload.context && Object.keys(event.payload.context).length > 0) {
     lines.push("");
     lines.push("Context:");
@@ -303,6 +516,14 @@ function buildContent(event: QueuedEvent): string {
 }
 
 async function pollLoop(): Promise<void> {
+  // Boot heartbeat — envoyé une fois au démarrage du plugin, AVANT le
+  // premier poll. Même si le bridge n'est pas actif côté serveur (donc on
+  // ne fera plus de heartbeat dans la boucle ensuite), ça évite le deadlock
+  // "lastSeenAt=null → UI bloquée sur 'never' → user ne peut pas activer".
+  // Avec ce boot, l'UI passe immédiatement à "Agent prêt · tape pour activer"
+  // dès que Claude Code lance le plugin.
+  let bootDone = false;
+
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const token = loadToken();
@@ -311,26 +532,53 @@ async function pollLoop(): Promise<void> {
       await new Promise((r) => setTimeout(r, BACKOFF_NO_TOKEN_MS));
       continue;
     }
+    if (!bootDone) {
+      void sendHeartbeat(token, loadBaseUrl());
+      bootDone = true;
+    }
 
     const baseUrl = loadBaseUrl();
     const result = await pollOnce(token, baseUrl);
 
-    if (result === "timeout") {
+    // Heartbeat — UNIQUEMENT quand le bridge est actif côté serveur.
+    // Cost-optim Vercel : si le server retourne 204 + Retry-After ≥ 30s
+    // c'est le signal "bridge inactif" (gate channel_active_until null/expiré).
+    // Dans ce cas le plugin entre en mode "présence silencieuse" — il poll
+    // pour rester réactif si l'user active, mais ne ping pas /heartbeat
+    // (qui couterait 1 fonction Vercel par minute pour rien). Auth_error
+    // skip aussi (token invalide → heartbeat rejeté).
+    const bridgeInactiveSignal =
+      result.kind === "timeout" &&
+      typeof result.retryAfterMs === "number" &&
+      result.retryAfterMs >= 30_000;
+    const shouldHeartbeat =
+      result.kind !== "auth_error" && !bridgeInactiveSignal;
+    if (shouldHeartbeat) {
+      void sendHeartbeat(token, baseUrl);
+    }
+
+    if (result.kind === "timeout") {
       // Update last poll for /scrollbox:configure status
       const state = loadState();
       state.lastPollAt = new Date().toISOString();
       saveState(state);
-      // Immediately re-poll
+      // Server can ask us to back off (Retry-After) when the bridge isn't
+      // active on the canvas — cost-optim Vercel. Honor it.
+      if (result.retryAfterMs && result.retryAfterMs > 0) {
+        await new Promise((r) => setTimeout(r, result.retryAfterMs));
+      }
       continue;
     }
 
-    if (result === "auth_error") {
-      await new Promise((r) => setTimeout(r, BACKOFF_4XX_MS));
+    if (result.kind === "auth_error") {
+      const wait = result.retryAfterMs ?? BACKOFF_4XX_MS;
+      await new Promise((r) => setTimeout(r, wait));
       continue;
     }
 
-    if (result === "error") {
-      await new Promise((r) => setTimeout(r, BACKOFF_NETWORK_MS));
+    if (result.kind === "error") {
+      const wait = result.retryAfterMs ?? BACKOFF_NETWORK_MS;
+      await new Promise((r) => setTimeout(r, wait));
       continue;
     }
 
@@ -339,8 +587,8 @@ async function pollLoop(): Promise<void> {
       await mcp.notification({
         method: "notifications/claude/channel",
         params: {
-          content: buildContent(result),
-          meta: buildMeta(result),
+          content: buildContent(result.event),
+          meta: buildMeta(result.event),
         },
       });
       const state = loadState();
