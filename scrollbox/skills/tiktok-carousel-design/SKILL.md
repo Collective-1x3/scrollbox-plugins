@@ -87,6 +87,62 @@ Exemple : revenue screenshot où il y a des chiffres écrits petits → 800px pe
 
 ---
 
+## 0bis-2. Pattern : décliner un master freeform avec swap d'assets
+
+Cas d'usage typique : l'user a un master freeform (4 slides éditées main, layers avec photos/textes), il te demande « décline en N variantes en swappant les backgrounds vers ces medias précis ».
+
+Le `declinate_piece` actuel **fork bit-à-bit** la piece (les variants sont des copies identiques du master). Le swap d'assets précis se fait ensuite via `update_piece` en mode freeform.
+
+### Workflow
+
+```
+1. inspect_piece_images({ pieceId: master })
+   → tu vois ce qu'il y a dans le master, tu identifies les ImageLayer
+     à swapper (ID, role, src actuel)
+
+2. search_account_media({ accountId, query?, proofKind? })
+   → tu obtiens des MediaRef "media:<uuid>" pour les photos cibles
+
+3. declinate_piece({ originPieceId, axes: ["asset"], plan: { variants: N } })
+   → crée N pieces freeform forkées bit-à-bit du master.
+     Tu obtiens variantPieceIds[]
+
+4. Pour CHAQUE variantPieceId :
+   update_piece({
+     pieceId: variantId,
+     layerPatches: [
+       {
+         slideIndex: 0,
+         layerPatches: [
+           { layerId: "lyr_bg_xxx", patch: { src: "media:<uuid>" } },
+           { layerId: "lyr_caption_yyy", patch: { src: "media:<uuid>" } }
+         ]
+       },
+       { slideIndex: 1, layerPatches: [...] },
+       // ...
+     ]
+   })
+   → le service résout media:<uuid> → URL via userMedia, applique le
+     patch direct aux slides[].layers[].
+```
+
+### Points clefs
+
+- **`update_piece` en mode freeform accepte `layerPatches`** (pas `slotPatch` qui est locked-only). Le patch peut muter `src` (URL ou `media:<uuid>`), `x`, `y`, `width`, `height`, `rotation`, `opacity`, `locked`, `label`, `fontSize`, etc.
+- **Les `media:<uuid>` sont résolus côté serveur** vers leurs URLs absolues userMedia (lookup scoped au user du piece).
+- **Pas de re-render auto en freeform** — l'user clique « Render » manuellement dans le studio quand il est prêt.
+- **Locked layers (`locked: true`) sont quand même protégés** par les filtres `findAdaptableTextLayers` / `findSwappableImageLayers` du framework decline. Si tu cibles un layer locked dans `update_piece` directement, ça passe (l'user a fait le choix), mais préfère ne pas le faire sauf instruction explicite — la convention reste « locked = jamais toucher ».
+
+### Erreurs courantes
+
+❌ `update_piece` avec `slotPatch` sur freeform → throw `"freeform mode — use layerPatches"`. Pour les freeform, toujours `layerPatches`.
+
+❌ Tenter `declinate_piece` en s'attendant à ce que `axis.target = "media:<uuid>"` swap les layers → le decline framework actuel pick les assets depuis le pool de l'account (random/recommandé), pas depuis le target spécifié. Le swap explicite passe par `update_piece` après le declinate.
+
+❌ Oublier de résoudre l'ID layer : `inspect_piece_images` retourne `layerId` dans la metadata — utilise CET id, pas un index ou un nom.
+
+---
+
 ## 0ter. Locked layers — never modify (CRITIQUE)
 
 The user can mark layers as **locked** in the studio (toggle 🔒 dans le props panel, ou Cmd+L). These layers are **load-bearing** — real proofs (revenue screenshots, testimonials), brand elements, signature photos. The user explicitly marked them as untouchable.
