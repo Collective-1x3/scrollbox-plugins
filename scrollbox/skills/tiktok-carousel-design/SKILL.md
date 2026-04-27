@@ -52,7 +52,42 @@ You now know exactly where text can go and how big it can be for every format.
 
 ---
 
-## 0bis. Locked layers — never modify (CRITIQUE)
+## 0bis. Voir les images d'une piece — `inspect_piece_images`
+
+Quand l'user te demande d'analyser, modifier ou décliner une piece freeform existante, tu **DOIS voir le contenu visuel** avant de proposer quoi que ce soit. Sans ça tu inventes — et `get_piece_v2` te donne juste des URLs sans le contenu visuel.
+
+### Default — `inspect_piece_images`
+
+```
+inspect_piece_images({ pieceId, slideIndex? })
+```
+
+Le tool retourne dans le même result :
+- **Metadata JSON** : pour chaque ImageLayer → `{ slideIndex, layerId, label, role, locked, src }`
+- **Les images en ImageContent base64 inline** (resized 800px max, JPEG q80, cap 10)
+
+Tu vois les photos directement dans ton tool result, pas besoin de WebFetch chaque URL une par une.
+
+**Quand utiliser** :
+- L'user dit « regarde les photos », « analyse cette piece », « qu'est-ce qu'il y a sur la slide X »
+- Avant de décliner une piece freeform : voir ce qui est preuve / persona / décor
+- Avant de modifier ou remplacer une image : comprendre ce qui est en place
+
+**Options** :
+- `slideIndex: N` → ne récupère que les images de cette slide (économise bandwidth)
+- `skipBackgrounds: true` → ignore les ImageLayer marqués `role="background"` (souvent gros et moins informatifs pour le contenu narratif)
+
+### Fallback — fetch direct si tu as besoin de plus de détail
+
+Si une image resized à 800px ne suffit pas (texte fin sur un screenshot, expression précise d'un visage, mention légale) → tu peux télécharger l'URL originale via WebFetch / Read URL. Le `src` complet est dans la metadata retournée par `inspect_piece_images`.
+
+Exemple : revenue screenshot où il y a des chiffres écrits petits → 800px peut suffire à voir "$5K" mais pas "$5,432.18". Si tu as besoin de la précision, fetch l'URL HD directement.
+
+**Hiérarchie** : default = `inspect_piece_images` (rapide, multi-images, intégré au tool result). Fallback HD = WebFetch URL (1 image, full résolution, plus lent).
+
+---
+
+## 0ter. Locked layers — never modify (CRITIQUE)
 
 The user can mark layers as **locked** in the studio (toggle 🔒 dans le props panel, ou Cmd+L). These layers are **load-bearing** — real proofs (revenue screenshots, testimonials), brand elements, signature photos. The user explicitly marked them as untouchable.
 
