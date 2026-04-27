@@ -1,14 +1,16 @@
 {
   "name": "scrollbox",
-  "description": "Scrollbox channel for Claude Code — push prompts from scroll-box.com directly into your terminal session. Pair with /scrollbox:configure <token>, then prompt from the canvas: the agent receives the event, calls Scrollbox MCP tools, replies stream back to the site.",
-  "version": "0.1.0",
+  "description": "Skills officielles Scrollbox pour Claude Code — playbook TikTok / IG carousel design (refonte 2026). Auto-chargée quand tu travailles sur des pieces scroll-box.com via le MCP scrollbox.",
+  "version": "1.0.0",
   "keywords": [
     "scrollbox",
     "tiktok",
     "carousel",
-    "channel",
-    "mcp",
+    "instagram",
     "creator",
-    "studio"
-  ]
+    "design",
+    "skills"
+  ],
+  "homepage": "https://scroll-box.com",
+  "repository": "https://github.com/Collective-1x3/scrollbox-plugins"
 }

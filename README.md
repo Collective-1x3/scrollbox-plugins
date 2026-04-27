@@ -9,28 +9,21 @@ Dans Claude Code :
 ```text
 /plugin marketplace add Collective-1x3/scrollbox-plugins
 /plugin install scrollbox@scrollbox
-/scrollbox:configure <ton_token>
+/reload-plugins
 ```
 
-Ensuite démarre Claude Code avec le channel activé :
-
-```bash
-claude --channels plugin:scrollbox@scrollbox
-```
-
-Récupère ton token sur [scroll-box.com/compte/cle-mcp](https://scroll-box.com/compte/cle-mcp).
+C'est tout. La skill `tiktok-carousel-design` est désormais auto-chargée par ton agent dès qu'il bosse sur des carousels TikTok / IG via le MCP scrollbox.
 
 ## Plugins
 
 | Plugin | Version | Description |
 | --- | --- | --- |
-| `scrollbox` | 0.1.0 | Channel — pousse des prompts depuis scroll-box.com vers ton terminal Claude Code (long-poll bidirectionnel via `/api/channel/dequeue` + `/api/channel/reply`). |
+| `scrollbox` | 1.0.0 | **Skills-only** — playbook design TikTok/IG carousel (loop validate→autofix→ship, safe zones, copy rules, locked layers, mass gen). Pour les agents qui pilotent scroll-box.com via le MCP. |
 
-## Pré-requis
+## Prérequis
 
-- Claude Code v2.1.80+ (research preview Channels)
-- Compte claude.ai (pas API key Console)
-- [Bun](https://bun.sh) installé (les plugins channels tournent via Bun)
+- Claude Code récent (`/plugin install` doit être dispo).
+- Compte [scroll-box.com](https://scroll-box.com) avec une clé MCP (`/compte/cle-mcp`) — la skill appelle les MCP tools `scrollbox` (declinate_piece, validate_piece, batch_render, etc.).
 
 ## License
 

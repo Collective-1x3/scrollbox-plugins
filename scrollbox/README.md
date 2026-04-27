@@ -1,49 +1,28 @@
-# Scrollbox channel for Claude Code
+# Scrollbox skills for Claude Code
 
-Pousse les prompts de **scroll-box.com** directement dans ta session Claude Code.
+Plugin **skills-only** — bundle le playbook design **TikTok / Instagram carousel** pour les agents Claude Code qui pilotent [scroll-box.com](https://scroll-box.com) via le MCP `scrollbox`.
 
-L'agent reçoit l'event en live, appelle les MCP tools Scrollbox sur
-`scroll-box.com/api/mcp`, et la réponse remonte dans le canvas du site.
+> **Note** — ce plugin contenait précédemment un bridge Channel (push depuis le site vers le terminal). Anthropic Channels reste en research preview avec une allowlist stricte qui le rend non-distribuable. Le bridge a été retiré ; on garde uniquement la skill, qui apporte 90% de la valeur.
 
-> Research preview — requires Claude Code v2.1.80+ and a claude.ai login
-> (Console / API key auth not supported).
+## Ce que la skill fait
 
-## Comment ça marche
+`tiktok-carousel-design` est un playbook de 436 lignes qui dicte à l'agent :
 
-```
-[Toi sur scroll-box.com]
-   │
-   │  clic « Décliner en 5 angles » sur la sélection canvas
-   ▼
-[POST /api/channel/push (Next.js)]
-   │
-   │  Met l'event en queue Postgres avec ton user_id
-   ▼
-[Plugin Bun local — ce repo]
-   │  long-poll GET /api/channel/dequeue (auth Bearer ta clé)
-   │  reçoit { pieceId, instruction, axes, context }
-   ▼
-[<channel source="scrollbox" event_id="..." piece_id="...">]
-   │  arrive comme tag dans ta session Claude Code
-   ▼
-[Agent Claude]
-   │  appelle Scrollbox MCP tools (declinate_piece, batch_render…)
-   │  appelle l'outil `reply` avec event_id + résumé
-   ▼
-[POST /api/channel/reply]
-   │  affiche le résumé dans l'activity panel du site
-```
+- **Loop non-négociable** : create → render → validate → autofix → ship
+- **Safe zones platform-aware** : TikTok video/carousel, IG Reels, Stories, Feed
+- **Typography mobile-first** : scale 7 rôles (mega/hook/subhook/body/cta/micro/label), max 3 tailles + 2 polices par slide
+- **Copy rules** : hook 5-9 mots livré (pas teasé), 1 slide = 1 idée, CTA spécifique
+- **Vocab banned** : 8 catégories AI-slop / engagement-bait / hedging
+- **Asset-first** : jamais inventer une preuve, demander à l'user
+- **Locked layers** : règle dure pour les preuves marquées `locked: true` côté studio
+- **Mass gen orchestration** : `plan_batch_campaign` avec 10 hook formulas + design/photo mix
+- **TikTok ≠ Instagram editorial** : défaut Hormozi/saturé, jamais Playfair sur cream
 
-## Prérequis
-
-- [Bun](https://bun.sh) — le serveur MCP tourne sous Bun.
-- Claude Code **v2.1.80+** avec login `claude.ai`.
-- Compte scroll-box.com avec une clé API utilisateur (générée sur
-  `/compte/cle-mcp`).
+L'agent la charge **automatiquement** dès qu'il bosse sur un carousel (Claude Code surveille `description` et match auto).
 
 ## Installation
 
-### Une fois le plugin publié sur GitHub
+### Via marketplace (recommandé)
 
 ```
 /plugin marketplace add Collective-1x3/scrollbox-plugins
@@ -51,7 +30,7 @@ L'agent reçoit l'event en live, appelle les MCP tools Scrollbox sur
 /reload-plugins
 ```
 
-### Dev local (avant publication)
+### Dev local
 
 ```
 git clone https://github.com/Collective-1x3/scrollbox-plugins
@@ -59,71 +38,29 @@ git clone https://github.com/Collective-1x3/scrollbox-plugins
 /plugin install scrollbox@scrollbox
 ```
 
-## Configuration
+## Prérequis
 
-1. **Récupère ta clé.** Va sur [scroll-box.com/compte/cle-mcp](https://scroll-box.com/compte/cle-mcp)
-   et clique « + Générer une clé ». Copie le token `sk_user_…` immédiatement.
+- Claude Code récent (v2.1.80+ recommandé pour `/plugin install`).
+- Compte [scroll-box.com](https://scroll-box.com) avec une **clé MCP** (générée sur `/compte/cle-mcp`) — la skill suppose que le serveur MCP `scrollbox` est connecté pour pouvoir appeler les tools (`declinate_piece`, `validate_piece`, `batch_render`, etc.).
 
-2. **Sauvegarde-le côté plugin.**
-   ```
-   /scrollbox:configure sk_user_a1b2c3d4...
-   ```
-   Écrit dans `~/.claude/channels/scrollbox/.env`. Tu peux aussi le mettre
-   dans ton shell : `export SCROLLBOX_TOKEN=sk_user_…` (le shell prime sur
-   le fichier).
+## Vérifier que la skill est chargée
 
-3. **Lance Claude Code avec le channel activé.**
-   ```bash
-   claude --channels plugin:scrollbox@scrollbox
-   ```
-   Pendant la research preview, si le plugin n'est pas encore sur la
-   allowlist Anthropic :
-   ```bash
-   claude --dangerously-load-development-channels plugin:scrollbox@scrollbox
-   ```
+Dans Claude Code :
 
-4. **Vérifie l'état.**
-   ```
-   /scrollbox:configure
-   ```
-   (sans argument) — affiche le token masqué et l'horodatage du dernier poll.
+```
+/help
+```
 
-## Usage
+Tu dois voir `tiktok-carousel-design` listé sous le namespace `scrollbox:`.
 
-Une fois connecté :
+Pour l'invoquer manuellement :
 
-- Va sur scroll-box.com `/studio` ou `/design`.
-- Sélectionne une piece, clique sur l'action « Décliner / Rerender / Modifier ».
-- L'instruction arrive dans ton terminal Claude Code dans la seconde.
-- L'agent fait le boulot via les MCP tools, puis appelle `reply` pour rapporter.
+```
+/scrollbox:tiktok-carousel-design
+```
 
-## Sécurité
-
-- Le token est une `sk_user_*` Scrollbox — **scoped à ton user**.
-- Long-polling sortant uniquement — **aucun port exposé**.
-- Le serveur de queue est sur scroll-box.com côté Next.js. Si tu révoques
-  ta clé sur `/compte/cle-mcp`, le plugin se voit refusé en 30s max.
-- Permission relay (Bash/Write/Edit) **non activé** dans cette version : les
-  prompts d'approbation restent dans ton terminal local.
-
-## Architecture
-
-| Composant | Rôle | Code |
-|-----------|------|------|
-| `server.ts` | MCP channel + long-poll loop | dans ce repo |
-| `/api/channel/push` | Endpoint Next.js qui accepte les events depuis le frontend | `app/api/channel/push/route.ts` côté scrollbox |
-| `/api/channel/dequeue` | Long-poll endpoint, retourne le 1er event en queue | `app/api/channel/dequeue/route.ts` |
-| `/api/channel/reply` | POST optionnel pour relayer le résultat dans l'activity panel | `app/api/channel/reply/route.ts` |
-| `channel_events` table | Queue Postgres : `id, user_id, payload, created_at, delivered_at, replied_at, reply_payload` | migration 0035 |
-
-## Limites
-
-- Research preview = features peut bouger.
-- Cap soft de 100 events queue par user (older = dropped).
-- Long-poll = 30s max par requête, le plugin re-poll automatiquement.
-- 1 plugin = 1 session = 1 user. Pour multi-user (équipes), il faudra
-  router par sub-channel — pas implémenté.
+Sinon, demande simplement à Claude un truc qui colle à la `description` (ex: "décline mon master TikTok en 5 variantes") et il la chargera tout seul.
 
 ## Licence
 
-Apache-2.0 — voir `LICENSE` (à ajouter côté repo public).
+Apache-2.0 — voir `LICENSE`.

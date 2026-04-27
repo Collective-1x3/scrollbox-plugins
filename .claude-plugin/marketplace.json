@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "scrollbox",
-  "description": "Plugins officiels Scrollbox — bridge entre scroll-box.com et ton terminal Claude Code.",
+  "description": "Plugins skills officiels Scrollbox pour Claude Code — playbook design TikTok/IG bundlé pour les agents qui pilotent scroll-box.com via MCP.",
   "owner": {
     "name": "Scrollbox",
     "email": "hello@scroll-box.com"
@@ -9,15 +9,15 @@
   "plugins": [
     {
       "name": "scrollbox",
-      "description": "Channel — pousse les prompts depuis scroll-box.com directement dans ta session Claude Code via long-poll bidirectionnel. Click 'Décliner' sur le site, le prompt arrive dans ton terminal en quelques secondes.",
+      "description": "Skill tiktok-carousel-design — playbook complet (loop create→validate→autofix→ship, safe zones, copy rules, locked layers, mass gen). Auto-chargée par Claude Code quand l'agent bosse sur des carousels via le MCP scrollbox.",
       "author": {
         "name": "Scrollbox",
         "email": "hello@scroll-box.com"
       },
       "source": "./scrollbox",
-      "category": "channel",
-      "homepage": "https://scroll-box.com/compte/cle-mcp",
-      "version": "0.1.0"
+      "category": "skills",
+      "homepage": "https://scroll-box.com",
+      "version": "1.0.0"
     }
   ]
 }
