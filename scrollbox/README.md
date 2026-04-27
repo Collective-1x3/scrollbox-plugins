@@ -45,21 +45,21 @@ git clone https://github.com/Collective-1x3/scrollbox-plugins
 
 ## Vérifier que la skill est chargée
 
-Dans Claude Code :
+Dans Claude Code, tape `/` (slash) — la skill doit apparaître dans le menu sous le namespace `scrollbox:` :
 
 ```
-/help
+scrollbox:tiktok-carousel-design
 ```
 
-Tu dois voir `tiktok-carousel-design` listé sous le namespace `scrollbox:`.
+Tu peux aussi demander directement à Claude « **quelles skills sont disponibles ?** » ou lister les plugins installés avec `/plugin`.
 
-Pour l'invoquer manuellement :
+Pour invoquer la skill manuellement :
 
 ```
 /scrollbox:tiktok-carousel-design
 ```
 
-Sinon, demande simplement à Claude un truc qui colle à la `description` (ex: "décline mon master TikTok en 5 variantes") et il la chargera tout seul.
+Sinon laisse Claude la charger automatiquement quand ta requête match sa description (ex: « décline mon master TikTok en 5 variantes »).
 
 ## Licence
 
