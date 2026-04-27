@@ -52,6 +52,59 @@ You now know exactly where text can go and how big it can be for every format.
 
 ---
 
+## 0bis. Channel events — locked layers et sélection user (CRITIQUE)
+
+When you receive a `<channel source="scrollbox">` event, the **piece snapshot** in the body tells you what NOT to touch. Read it before doing anything.
+
+### `🔒 Locked layers` block — **never modify**
+
+If the snapshot contains:
+
+```
+🔒 Locked layers (NE PAS MODIFIER):
+  - lyr_xxx (image) "preuve_revenu_screenshot"
+  - lyr_yyy (text) "Témoignage Marie"
+```
+
+Those layers are user-protected. **Hard rule:**
+
+- Do NOT change their `src`, `text`, position, size, rotation, opacity, or any other property.
+- When you call `update_piece` / `update_piece_slot`, exclude them from the patch.
+- If declining the piece, the variant must keep them byte-identical (decline framework already handles this when `locked: true` is set, but double-check).
+- If validation flags a locked layer (rare), prefer `post_agent_message` to ask the user how to resolve, never autofix it.
+
+The user marked them locked because they're load-bearing (real proof, brand, signature element). Touching them = breaks the piece's authenticity.
+
+### `selected_layer_id` in context — **preserve by default**
+
+The push context may include:
+
+```
+Context:
+  selected_layer_id: lyr_abc
+  selected_layer_type: image
+  selected_layer_label: "preuve_3"
+  selected_layer_locked: false
+```
+
+Convention:
+
+- If the user's instruction does **not** mention this layer explicitly → **preserve it** (treat it like an implicit lock for this task only).
+- If the instruction is "change everything except / sauf / garde / keep this" → confirm by preserving the selected layer.
+- If the instruction directly targets the layer ("rewrite THIS hook", "swap THIS photo") → operate on it.
+- When ambiguous, default to preservation and mention it in your `reply` ("Gardé `preuve_3` intact, modifié le reste — dis-moi si tu voulais autre chose").
+
+This is softer than `locked: true` — it's a session hint, not a permanent flag. The user clicked the layer right before prompting, so it's "what they're holding in their hands". Don't drop it on the floor.
+
+### Why both exist
+
+- **`locked: true`** = durable. Survives page reloads, decline forks, batch renders. For load-bearing assets (proofs, brand element, signature photo).
+- **`selected_layer_id`** = ephemeral. Only this push. For "the thing I just clicked, leave it alone for now".
+
+Together, they let the user say "preserve these forever, plus this for now" without writing it in the prompt.
+
+---
+
 ## 1. The Loop (non-negotiable)
 
 Every piece goes through this sequence. Skipping steps produces pieces that look AI. Doing it all produces pieces indistinguishable from a real creator.
